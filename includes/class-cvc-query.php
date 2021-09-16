@@ -75,6 +75,8 @@ class Content_Views_CiviCRM_Query {
 			foreach ( $query as $key => $value ) {
 				if ( $this->cvc->dp_options->has_option( $key, Content_Views_CiviCRM_Dp_Option::CONTACT_NAME_SEARCH ) ) {
 					$params[ $key ] = [ "IN" => $this->search_contact_name( $value ) ];
+				else if ( $this->cvc->dp_options->has_option( $key, Content_Views_CiviCRM_Dp_Option::EVENT_NAME_SEARCH ) ) {
+					$params[ $key ] = [ "IN" => $this->search_event_name( $value ) ];
 				} else {
 					$params[ $key ] = $value;
 				}
@@ -105,6 +107,21 @@ class Content_Views_CiviCRM_Query {
 
 	protected function search_contact_name( string $search ) {
 		$result = $this->cvc->api->call_values( 'Contact', 'get', [
+			'sequential' => 1,
+			'return'     => [ "id" ],
+			'sort_name'  => $search,
+			'options'    => [ 'limit' => 0 ]
+		] );
+		$ids    = [];
+		foreach ( $result as $item ) {
+			$ids[] = $item['id'];
+		}
+
+		return $ids;
+	}
+
+	protected function search_event_name( string $search ) {
+		$result = $this->cvc->api->call_values( 'Event', 'get', [
 			'sequential' => 1,
 			'return'     => [ "id" ],
 			'sort_name'  => $search,
