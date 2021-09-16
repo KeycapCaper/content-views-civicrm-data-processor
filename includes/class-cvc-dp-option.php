@@ -7,6 +7,7 @@ class Content_Views_CiviCRM_Dp_Option {
 	const MULTIVALUE_LIST = 'l';
 	const USER_CONTACT_ID = 'i';
 	const CONTACT_NAME_SEARCH = 's';
+	const EVENT_NAME_SEARCH = 'e';
 
 	/**
 	 * Plugin instance reference.
