@@ -166,10 +166,6 @@ class Content_Views_CiviCRM_Query {
 			$apiParams = $this->create_api_params_from_arguments( $args );
 			$apiParams['options'] = $args['civicrm_api_params']['options'] ?: [];
 
-
-			echo "<pre>", print_r($args['civicrm_api_params'], true), "</pre>";
-			echo "<pre>", print_r($apiParams, true), "</pre>";
-
 			$result = $this->cvc->api->call_values( $dp['api_entity'], $dp['api_action'], $apiParams );
 
 			// clear posts from previous short codes
