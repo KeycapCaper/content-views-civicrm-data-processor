@@ -162,7 +162,9 @@ class Content_Views_CiviCRM_Query {
 				'data_processor_id' => $args['data_processor_id']
 			] );
 			$dp     = array_shift( $dp );
-			$result = $this->cvc->api->call_values( $dp['api_entity'], $dp['api_action'], $args['civicrm_api_params'] );
+			
+			$apiParams = $this->parseApiParams( $args );
+			$result = $this->cvc->api->call_values( $dp['api_entity'], $dp['api_action'], $apiParams );
 
 			// clear posts from previous short codes
 			$posts = [];
@@ -207,5 +209,46 @@ class Content_Views_CiviCRM_Query {
 			return $posts;
 
 		}, 10, 2 );
+	}
+
+	/**
+	 * Convert the raw input into the expected format
+	 * for CiviCRM API Parameters based on Data Processor Settings
+	 * 
+	 * @param array $apiParams Raw API params
+	 * 
+	 * @return array $civicrmApiParams Params in the format CiviCRM expects
+	 * @since 0.2.2
+	 */
+	protected function parseApiParams($args) {
+
+		// Grab list of filters settings and modify api call
+		$filtersList = $this->cvc->api->call_values( 'DataProcessorFilter', 'get', [
+			'sequential'        => 1,
+			'is_required'       => 0,
+			'is_exposed'        => 1,
+			'data_processor_id' => $args['data_processor_id']
+		] );
+		if (!empty($filtersList)) {
+			foreach ($filtersList as $filter) {
+				$name = $filter['name'];
+				// This filter is not currently used
+				if (empty($args['civicrm_api_params'][$name])  || empty($args['civicrm_api_params'][$name]['filter_value'])) {
+					continue;						
+				}
+				// This filter does not have a special operation
+				if (empty($args['civicrm_api_params'][$name]['filter_value']) || empty($args['civicrm_api_params'][$name]['filter_value']['op'])) {
+					continue;						
+				}
+				$filter_value = $args['civicrm_api_params'][$name]['filter_value'];
+			}
+		}
+
+
+		echo "<pre>", print_r($args['civicrm_api_params'], true), "</pre>";
+		echo "<pre>", print_r($filtersList, true), "</pre>";
+		
+		$args['civicrm_api_params']['event_title'] = [ 'LIKE' => '%'. $args['civicrm_api_params']['event_title'] . '%'];
+		echo "<pre>", print_r($args['civicrm_api_params'], true), "</pre>";
 	}
 }
