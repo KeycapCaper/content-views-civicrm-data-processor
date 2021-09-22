@@ -163,7 +163,13 @@ class Content_Views_CiviCRM_Query {
 			] );
 			$dp     = array_shift( $dp );
 			
-			$apiParams = $this->parseApiParams( $args );
+			$apiParams = $this->create_api_params_from_arguments( $args );
+			$apiParams['options'] = $args['civicrm_api_params']['options'] ?: [];
+
+
+			echo "<pre>", print_r($args['civicrm_api_params'], true), "</pre>";
+			echo "<pre>", print_r($apiParams, true), "</pre>";
+
 			$result = $this->cvc->api->call_values( $dp['api_entity'], $dp['api_action'], $apiParams );
 
 			// clear posts from previous short codes
@@ -213,42 +219,213 @@ class Content_Views_CiviCRM_Query {
 
 	/**
 	 * Convert the raw input into the expected format
-	 * for CiviCRM API Parameters based on Data Processor Settings
+	 * for CiviCRM API Parameters based on Data Processor Filter Settings
 	 * 
-	 * @param array $apiParams Raw API params
+	 * @param array $args Query args to instantiate WP_Query
 	 * 
-	 * @return array $civicrmApiParams Params in the format CiviCRM expects
+	 * @return array $apiParams API params in the format CiviCRM expects
 	 * @since 0.2.2
 	 */
-	protected function parseApiParams($args) {
+	public function create_api_params_from_arguments( $args ) {
 
-		// Grab list of filters settings and modify api call
+		// Retrieve a list of filters defined on Data Processor
 		$filtersList = $this->cvc->api->call_values( 'DataProcessorFilter', 'get', [
 			'sequential'        => 1,
 			'is_required'       => 0,
 			'is_exposed'        => 1,
 			'data_processor_id' => $args['data_processor_id']
 		] );
-		if (!empty($filtersList)) {
+
+		$apiParams = [];
+		if ( ! empty( $filtersList ) ) {
 			foreach ($filtersList as $filter) {
-				$name = $filter['name'];
-				// This filter is not currently used
-				if (empty($args['civicrm_api_params'][$name])  || empty($args['civicrm_api_params'][$name]['filter_value'])) {
-					continue;						
+				$apiParam = $this->filter_to_api_param( $args, $filter );
+				if ( $apiParam !== null ) {
+					$name = $filter['name'];
+					$apiParams[ $name ] = $apiParam;
 				}
-				// This filter does not have a special operation
-				if (empty($args['civicrm_api_params'][$name]['filter_value']) || empty($args['civicrm_api_params'][$name]['filter_value']['op'])) {
-					continue;						
-				}
-				$filter_value = $args['civicrm_api_params'][$name]['filter_value'];
 			}
 		}
 
-
-		echo "<pre>", print_r($args['civicrm_api_params'], true), "</pre>";
-		echo "<pre>", print_r($filtersList, true), "</pre>";
-		
-		$args['civicrm_api_params']['event_title'] = [ 'LIKE' => '%'. $args['civicrm_api_params']['event_title'] . '%'];
-		echo "<pre>", print_r($args['civicrm_api_params'], true), "</pre>";
+		return $apiParams;
 	}
+
+	/**
+	 * Convert a filter to CiviCRM API format
+	 * See: Civi\DataProcessor\FilterHandler\ContactFilter::applyFilterFromSubmittedFilterParams
+	 * 
+	 * @param array $args Query args to instantiate WP_Query
+	 * @param array $filter item returned DataProcessorFilter call
+	 * 
+	 * @return array $apiParams API params in the format CiviCRM expects
+	 * @return null Filter is not currently set
+	 * @since 0.2.2
+	 */
+	public function filter_to_api_param( $args, $filter ) {
+
+		$civicrm_api_params = $args['civicrm_api_params'];
+		$name = $filter['name'];
+		$type = $filter['type'];
+
+		// This filter is not currently used
+		if (empty($civicrm_api_params[$name])) {
+			return null;
+		}
+		
+		// This filter does not tell us what to do, the default is the has operator
+		$filter_value = empty($filter['filter_value']) ? [ 'op' => 'has' ] : $filter['filter_value'];
+
+		if ( $type === 'date_filter' /* || $filterSpec->type == 'Timestamp' */ ) {
+			// Handle dates separately
+			return $this->date_filter_to_api_param( $args, $filter );
+		} elseif ( isset( $filter_value['op'] ) ) {
+			$op = $filter_value['op'];
+			switch ( $op ) {
+				case 'IN':
+				case 'NOT IN':
+				case '=':
+				case '!=':
+				case '>':
+				case '<':
+				case '>=':
+				case '<=':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						return [
+							$op => $civicrm_api_params[$name]
+						];
+					}
+					break;
+				case 'has':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						return [
+							'LIKE' => '%' . $civicrm_api_params[$name] . '%'
+						];
+					}
+					break;
+				case 'nhas':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						return [
+							'NOT LIKE' => '%' . $filter_value['value'] . '%'
+						];
+					}
+					break;
+				case 'sw':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						return [
+							'LIKE' => $filter_value['value'] . '%'
+						];
+					}
+					break;
+				case 'ew':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						return [
+							'LIKE' => '%' . $filter_value['value']
+						];
+					}
+					break;
+				case 'null':
+					return [
+						'IS NULL' => 1,
+					];
+				case 'not null':
+					return [
+						'IS NOT NULL' => 1,
+					];
+				case 'bw':
+				case 'nbw':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						$min_max = explode( ';', $civicrm_api_params[$name] );
+						if ( count( $min_max ) === 2 ) {
+							return [
+								($op === 'nbw' ? 'NOT ' : '') . 'BETWEEN' => [ $min_max[0], $min_max[1] ]
+							];
+						}
+					}
+					break;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Translated date filters into the correct CiviCRM API Call
+	 * See: Civi\DataProcessor\FilterHandler\ContactFilter::applyDateFilter
+	 * 
+	 * @param array $args Query args to instantiate WP_Query
+	 * @param array $filter item returned DataProcessorFilter call
+	 * 
+	 * @return array $apiParams API params in the format CiviCRM expects
+	 * @return null Filter is not currently set
+	 * @since 0.2.2
+	 */
+	public function date_filter_to_api_param( $args, $filter ) {
+
+		$civicrm_api_params = $args['civicrm_api_params'];
+		$name = $filter['name'];
+
+		// This filter is not currently used
+		if ( empty( $civicrm_api_params[$name] ) ) {
+			return null;
+		}
+
+		// This filter does not tell us what to do, the default is the has operator
+		$filter_value = empty( $filter['filter_value'] ) ? [ 'op' => '=', 'min' => '', 'max' => '' ] : $filter['filter_value'];
+
+		if ( isset( $filter_value['op'] ) ) {
+			$op = $filter_value['op'];
+			switch ( $op ) {
+				case '=':
+				case '!=':
+				case '>':
+				case '<':
+				case '>=':
+				case '<=':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						try {
+							$dateTime = new DateTime( $civicrm_api_params[$name] );
+						} catch (Exception $e) {
+							// not a valid date
+							return null;
+						}
+						return [
+							// Not the best way to differentiate dates from datetimes, but will likely work in the vast majority of cases
+							$op => $dateTime->format( 'His' ) === '000000' ? $dateTime->format( 'Y-m-d' ) : $dateTime->format( 'Y-m-d H:i:s' )
+						];
+					}
+					break;
+				case 'null':
+					return [
+						'IS NULL' => 1,
+					];
+				case 'not null':
+					return [
+						'IS NOT NULL' => 1,
+					];
+				case 'bw':
+				case 'nbw':
+					if ( isset( $civicrm_api_params[$name] ) && $civicrm_api_params[$name] ) {
+						$min_max = explode( ';', $civicrm_api_params[$name] );
+						if ( count( $min_max ) === 2 ) {
+							try {
+								$dateTimeStart = new DateTime( $min_max[0] );
+								$dateTimeEnd = new DateTime( $min_max[1] );
+							} catch (Exception $e) {
+								// not valid dates
+								return null;
+							}
+							$start = $dateTimeStart->format( 'His' ) === '000000' ? $dateTimeStart->format( 'Y-m-d' ) : $dateTimeStart->format( 'Y-m-d H:i:s' );
+							$end = $dateTimeEnd->format( 'His' ) === '000000' ? $dateTimeEnd->format( 'Y-m-d' ) : $dateTimeEnd->format( 'Y-m-d H:i:s' );
+							return [
+								($op === 'nbw' ? 'NOT ' : '') . 'BETWEEN' => [ $start, $end ]
+							];
+						}
+					}
+					break;
+			}
+		}
+
+		return null;
+	}
+
 }
